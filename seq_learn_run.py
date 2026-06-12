@@ -187,17 +187,32 @@ def run_single_experiment(model_name,
     logger.config = config
 
     ##############################
-    # Testing phase (with frozen weights)
+    # Testing phase (Changed to random testing to match the human experiment)
     ##############################
+    testing_curriculum = 'random' # 'same_as_last_curriculum' or 'random'
     if model_name == 'mrnn': # because the input horizon is so long it eats up most of the 240 ts testing phase as a quick fix, log in the initial timesteps, before I would exclude them as 'burn-in'
         config.log_initial_burn_in_timesteps = True
     logger.log_phase('Testing\n(W frozen)')
     config.no_of_steps_in_weight_space = 0
     testing_phase_length = 40 * config.task_length
-    if curriculum == ['interleaved', 'blocked_interleaved']: # continue testing with whatever was the current curriculum.
-        config.block_size = 1 * config.task_length
-    elif curriculum in ['blocked', 'interleaved_blocked', ]:
-        config.block_size = stored_block_size
+    if testing_curriculum == 'same_as_last_curriculum':
+        print(f"Testing with the same curriculum as training: {curriculum}")
+        if curriculum == ['interleaved', 'blocked_interleaved']: # continue testing with whatever was the current curriculum.
+            config.block_size = 1 * config.task_length
+        elif curriculum in ['blocked', 'interleaved_blocked', ]:
+            config.block_size = stored_block_size
+    else:       
+        print(f"Testing with a random curriculum (different from training)")
+        config.shuffle_or_interleave = 'random' # Contexts will appear randomly during testing instead of in interleaved
+        config.block_size = 1 * config.task_length # sample context every trial
+
+        # Adjustments to NeuraGEM to accommodate random testing curriculum as described in Methods 3.2
+        if model_name == 'neuragem':
+            config.LU_lr = 0.4 # from 0.2
+            config.no_of_steps_in_latent_space = 5
+            config.l2_loss = 0.0004 # from 0.00004
+
+
     config.no_of_blocks = int(testing_phase_length / config.block_size)
     _, _, dataloader, _ = create_datasets_and_loaders(config)
     predictive_learning(logger, config, dataloader, model)
@@ -206,15 +221,16 @@ def run_single_experiment(model_name,
     return logger
 
 if __name__ == "__main__":
-    models = ['rnn', 'mrnn', 'neuragem']
+    # models = ['rnn', 'mrnn', 'neuragem']
     # models = ['rnn', 'neuragem']
     # models = ['mrnn',]
-    # models = ['neuragem',]
+    models = ['neuragem',]
 
     # the curricula you want to sweep over:
     # curricula = ['blocked', 'interleaved', 'interleaved_blocked', ]
     # 'blocked_interleaved' ]
-    curricula = ['interleaved_blocked', 'blocked', 'interleaved', ]
+    curricula = ['interleaved']
+    # curricula = ['interleaved_blocked', 'blocked', 'interleaved', ]
 
     # global overrides
     config_overrides = {
@@ -258,7 +274,7 @@ if __name__ == "__main__":
     # make a folder name excluding seed
     filtered = {k: v for k, v in param_combination.items() if k != 'seed'}
     combination_key = "_".join(f"{k}-{v}" for k, v in sorted(filtered.items()))
-    export_path = os.path.join('./exports/csw/experiments', run_name, combination_key)
+    export_path = os.path.join('./exports/seq_learn/experiments', run_name, combination_key)
     os.makedirs(export_path, exist_ok=True)
 
     print(f"Running {model_name} | curriculum={curriculum} | params={param_combination}")

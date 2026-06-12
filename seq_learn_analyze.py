@@ -43,6 +43,7 @@ import matplotlib.gridspec as gridspec
 
 from seq_learn_config import run_name, export_base_path, get_base_params
 
+transitions_to_use = ['T5/6'] # To compute accuracy, it reflects learning the underlying computation.
 # %% THIS CODE IS ADAPTED FROM THE ORIGINAL PAPER REPOSITORY. 
 ## Load human data
 # From the Collab authors provided at: https://colab.research.google.com/github/PrincetonCompMemLab/csw_paper_final/blob/master/generate_paper_figures.ipynb#scrollTo=kmnNJROHRq7f&uniqifier=1
@@ -216,7 +217,7 @@ for base_model in base_models:
             filtered = param_combination.copy()
             combination_key = "_".join(f"{k}-{v}" for k, v in sorted(filtered.items()))
 
-            export_path = os.path.join('./exports/csw/experiments', run_name, combination_key)
+            export_path = os.path.join('./exports/seq_learn/experiments', run_name, combination_key)
             filename    = f"results_{base_model}_{combination_key}_seed-{seed}.pkl"
             logger      = load_results(filename, export_path)
 
@@ -282,7 +283,9 @@ def plot_human_data_by_condition_cached(curriculum, ax=None, width = 0.5):
     g = sns.violinplot(
         data=grouped,
         x='condition', y='score', hue_order='condition', ax=ax, order=condL,
-        width=width  # Slim the violins
+        width=width,  # Slim the violins
+        inner=None,
+        linewidth=0.7,  # Remove inner markings
     )
     sns.stripplot(
         data=grouped,
@@ -318,7 +321,7 @@ for curriculum in curricula:
         runs = []
         for key, loggers in all_loggers[curriculum][model].items():
             runs = loggers
-            scs = [compute_testing_score(l, transitions_to_use=['T1/2',])
+            scs = [compute_testing_score(l, transitions_to_use=transitions_to_use)
                    for l in runs]
             all_scores.extend(scs)
             all_models.extend([model]*len(scs))
@@ -338,7 +341,9 @@ for curriculum in curricula:
     palette = [getattr(cs, m, 'gray') for m in models_to_plot]
     sns.violinplot(x='model', y='accuracy', data=df,
                    order=models_to_plot, ax=ax,
-                   palette=palette, scale='width', width=0.4),
+                   palette=palette, scale='width', width=0.4,
+                   inner=None,
+                   linewidth=0.7,)  # Remove inner markings
     sns.stripplot(x='model', y='accuracy', data=df,
                   order=models_to_plot, ax=ax,
                   color='black', size=cs.marker_size,
@@ -348,7 +353,7 @@ for curriculum in curricula:
     ax.set_ylabel("")
     ax.set_yticklabels([])
     ax.set_xlabel("")
-    ax.set_xticklabels(['RNN', 'MRNN', 'NG',])# 'NG\nZ-Lesioned'])
+    ax.set_xticklabels([r"RNN$^{\mathrm{short}}$", r"RNN$^{\mathrm{long}}$", 'NG',])# 'NG\nZ-Lesioned'])
 
     # axes[3]: vertical stack of latent trace and regression boxplot
     # We'll use inset_axes to create two vertical panels inside axes[3]
@@ -361,7 +366,7 @@ for curriculum in curricula:
                  if "latent_updates_during_shuffle-True" in k]
     runs_true = runs_true[0] if runs_true else []
     if runs_true:
-        ex = runs_true[0]
+        ex = runs_true[1] # just pick one run to visualize the latent space and switches; the regression will be computed across all runs
         li = np.concatenate(ex.latent_values, axis=0).reshape(-1, ex.latent_values[0].shape[-1])
         ax_latent.plot(li, '-', linewidth=0.5, alpha=0.8)
         plot_switches_from_logger(ax_latent, ex, ex.config, use_ll=False, alpha =0.2, alpha_interleaved=0.2)
@@ -373,7 +378,7 @@ for curriculum in curricula:
             ax_latent.set_xlim(t_block-100, t_block+140)
         else:
             t_test = next(t for name, t in ex.phases if name.startswith('Testing'))
-            ax_latent.set_xlim(t_test-200, t_test)
+            ax_latent.set_xlim(1000, 1200)
 
     curriculum_phase_to_regress = {
         'blocked': 'blocked',
@@ -387,7 +392,7 @@ for curriculum in curricula:
                               ax=ax_reg, orient='v')
     ## regress betas for neuragem and save them for later plotting in cid_above and cid_below and rnd_above and rnd_below
     if curriculum == 'interleaved_blocked':
-        scores = [compute_testing_score(l, transitions_to_use=['T1/2',])
+        scores = [compute_testing_score(l, transitions_to_use=transitions_to_use)
                 for l in runs_true]
         # Separate runs_true into above-average and below-average groups
         avg_score = np.mean(scores)
@@ -428,7 +433,7 @@ for curriculum in curricula:
     else:
         ax.set_position((pos.x0 + 0.18, pos.y0, pos.width *0.5, pos.height))
 
-    save_folder = f'./exports/csw/{run_name}/analysis/'
+    save_folder = f'./exports/seq_learn/{run_name}/analysis/'
     os.makedirs(save_folder, exist_ok=True)
     fname = f"all_models_latent_{curriculum}.pdf"
     save_path = os.path.join(save_folder, fname)

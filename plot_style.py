@@ -31,6 +31,23 @@ class Color_scheme:
         self.panel_large_size = [1.9, 1.9]
         self.panel_wide_size = [1.9, 1.2]
         self.panel_tall_size = [1.2, 1.9]
+    
+        # Starting in Seaborn 0.13.0, several defaults were updated,  plots suddenly look “heavier,” more opaque, or have unexpected inner marks    
+        # the following settings restore the previous defaults for violin plots, which are used in some of our figures. 
+        # sns.violinplot(data=df, x="x", y="y", **cs.old_violin_defaults)
+        self.old_violin_defaults = dict(
+            fill=True,
+            # inner=None,
+            linewidth=1,
+            saturation=0.75,
+            linecolor="black",
+            scale="width",
+            # cut=1, 
+            # bw_adjust=.5,
+            # density_norm="area",
+            # native_scale=False,
+        )
+        # self.old_violin_defaults = dict() # revereted seaborn to 12.2!!
 
     def get_model_color(self, model_name):
         if model_name in ['short_horizon_rnn', 'long_horizon_rnn', 'neuragem']:
@@ -80,3 +97,4 @@ def set_plot_style():
 
     # Set the line width
     mpl.rcParams['lines.linewidth'] = 0.7
+
