@@ -113,7 +113,7 @@ def compute_phase_betas(loggers: list, phase: str) -> tuple [np.ndarray, np.ndar
         
         betas = compute_regression_betas(ts_start, ts_end, features, target)
         cid_betas.append(betas[1])
-        rnd_betas.append(betas[2]) #+ betas[4])
+        rnd_betas.append(betas[2] )#+ betas[4])
     return np.array(cid_betas), np.array(rnd_betas)
 
 def plot_cid_rnd_single_phase(cid_betas, rnd_betas, phase_name, cs=None, ax : mpl.axes._axes.Axes =None, orient : str ='h'):
@@ -126,7 +126,7 @@ def plot_cid_rnd_single_phase(cid_betas, rnd_betas, phase_name, cs=None, ax : mp
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(cs.panel_small_size[0], cs.panel_small_size[1]))
     sns.boxplot(data=df, ax=ax, palette=['grey', 'grey'],
-                width=0.6, showfliers=False, orient=orient)
+                width=0.6, showfliers=False, orient=orient, linewidth=0.7)
     sns.stripplot(data=df, ax=ax, color='black',
                   size=cs.marker_size, jitter=True, alpha=0.5, orient=orient)
     if orient == 'h':

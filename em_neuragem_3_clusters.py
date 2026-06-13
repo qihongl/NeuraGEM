@@ -3,25 +3,11 @@
 Here are the experiments to describe the z space and what is learned. 
 '''
 
-def run_from_ipython():
-    try:
-        __IPYTHON__
-        return True
-    except NameError:
-        return False
-
-try:
-    if run_from_ipython():
-        from IPython import get_ipython
-        get_ipython().run_line_magic('load_ext', 'autoreload')
-        get_ipython().run_line_magic('autoreload', '2')
-    # %reload_ext autoreload
-    # %autoreload 2
-except: pass
-# supress all warnings and messages from matplotlib
-import logging
-logging.getLogger('matplotlib.font_manager').disabled = True
-
+if 'get_ipython' in globals():
+    from IPython import get_ipython
+    get_ipython().run_line_magic('load_ext', 'autoreload')
+    get_ipython().run_line_magic('autoreload', '2')
+    
 import torch
 from torch.utils.data import Dataset, DataLoader   
 import torch.nn as nn

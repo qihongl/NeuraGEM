@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 import torch
 import os
 import matplotlib.transforms as mtransforms
@@ -271,7 +272,7 @@ def plot_logger_panels(logger, config, panel_order, x2=None, dpi=100, subplot_he
             phase_midpoint = (phase_start + phase_end) / 2
             # add newlines to the phase name based on the number of words, to avoid overlap
             phase_name = '\n'.join(phase_name.split())
-            
+
             ax.axvline(phase_start, color='tab:green', linestyle='-', linewidth=3, alpha=0.7)
             y_factor = 1.05 if subplot_height == 4 else 1.8
             ax.text(phase_midpoint, ax.get_ylim()[1] * y_factor, phase_name, rotation=0, verticalalignment='top', color='tab:green',
@@ -841,7 +842,7 @@ def plot_corrects_seq_learn(logger, config):
         ax.axvline(x=switch, color='r', linestyle='--', alpha=0.2)
     ax.set_ylim([0,1])
     ax = axes['C']
-    cmap = mpl.cm.get_cmap('viridis')
+    cmap = matplotlib.cm.get_cmap('viridis')
     window_pre, window_post = 5, 20
     switch_centered_corrects = []
     for i, t_switch in enumerate(np.arange(0, len(corrects), bs)):
@@ -877,50 +878,6 @@ def plot_corrects_seq_learn(logger, config):
     ax.set_ylabel('Loss')
 
     return corrects_fig
-
-
-
-def plot_seq_learn_behavior(logger, config, which_trials_to_plot='all'):
-    ''' plot the behavior of the model 
-    which_trials_to_plot specifies if to plot 'all' trials
-    or the 'first' or 'last' 10 trials
-    or the 'first_half' or 'second_half' of the trials
-
-    '''
-
-    def filter_starts(A3_starts, A4_starts, B3_starts, B4_starts, which_trials_to_plot):
-        if which_trials_to_plot == 'all':
-            return A3_starts, A4_starts, B3_starts, B4_starts
-        elif which_trials_to_plot == 'first':
-            return A3_starts[:10], A4_starts[:10], B3_starts[:10], B4_starts[:10]
-        elif which_trials_to_plot == 'last':
-            return A3_starts[-10:], A4_starts[-10:], B3_starts[-10:], B4_starts[-10:]
-        elif which_trials_to_plot == 'first_half':
-            return A3_starts[:len(A3_starts)//2], A4_starts[:len(A4_starts)//2], B3_starts[:len(B3_starts)//2], B4_starts[:len(B4_starts)//2]
-        elif which_trials_to_plot == 'second_half':
-            return A3_starts[len(A3_starts)//2:], A4_starts[len(A4_starts)//2:], B3_starts[len(B3_starts)//2:], B4_starts[len(B4_starts)//2:]
-        
-    A3_color = 'blue'
-    A4_color = 'green'
-    B3_color = 'orange'
-    B4_color = 'red'
-    fig, axes = plt.subplots(6, 4, figsize=(8, 6))
-    A3_starts, A4_starts, B3_starts, B4_starts, inputs, outputs = extract_trial_starts_by_type(logger, config)
-
-    corrects_fig = plot_corrects_seq_learn(logger, config)
-
-    A3_starts, A4_starts, B3_starts, B4_starts = filter_starts(A3_starts, A4_starts, B3_starts, B4_starts, which_trials_to_plot)
-
-    plot_predictions_by_sequence_type(inputs, outputs, A3_starts, axes[:, 0], A3_color)
-    plot_predictions_by_sequence_type(inputs, outputs, A4_starts, axes[:, 1], A4_color)
-    plot_predictions_by_sequence_type(inputs, outputs, B3_starts, axes[:, 2], B3_color)
-    plot_predictions_by_sequence_type(inputs, outputs, B4_starts, axes[:, 3], B4_color)
-    axes[0, 0].set_title('A3')
-    axes[0, 1].set_title('A4')
-    axes[0, 2].set_title('B3')
-    axes[0, 3].set_title('B4')
-    fig.tight_layout()
-    return fig, corrects_fig
 
 
 class Logger:
@@ -1275,3 +1232,125 @@ def criterion_self_fullfilling_prophecy(output, _):
     ''' This loss function is used to capture the COIN task where humans are given motor feedback 
     that exactly matches their predictions. The loss is the difference between the predicted output and the most recent output. ''' 
     return torch.nn.functional.mse_loss(output[:, 1:], output[:, :-1].detach(), reduction='none')
+
+# A function to rasterize components of a matplotlib figure while keeping
+# axes, labels, etc as vector components
+# https://brushingupscience.wordpress.com/2017/05/09/vector-and-raster-in-one-with-matplotlib/
+from inspect import getmembers, isclass
+
+def rasterize_and_save(fname, rasterize_list=None, fig=None, dpi=None,
+                       savefig_kw={}):
+    """Save a figure with raster and vector components
+
+    This function lets you specify which objects to rasterize at the export
+    stage, rather than within each plotting call. Rasterizing certain
+    components of a complex figure can significantly reduce file size.
+
+    Inputs
+    ------
+    fname : str
+        Output filename with extension
+    rasterize_list : list (or object)
+        List of objects to rasterize (or a single object to rasterize)
+    fig : matplotlib figure object
+        Defaults to current figure
+    dpi : int
+        Resolution (dots per inch) for rasterizing
+    savefig_kw : dict
+        Extra keywords to pass to matplotlib.pyplot.savefig
+
+    If rasterize_list is not specified, then all contour, pcolor, and
+    collects objects (e.g., ``scatter, fill_between`` etc) will be
+    rasterized
+
+    Note: does not work correctly with round=True in Basemap
+
+    Example
+    -------
+    Rasterize the contour, pcolor, and scatter plots, but not the line
+
+    >>> import matplotlib.pyplot as plt
+    >>> from numpy.random import random
+    >>> X, Y, Z = random((9, 9)), random((9, 9)), random((9, 9))
+    >>> fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(ncols=2, nrows=2)
+    >>> cax1 = ax1.contourf(Z)
+    >>> cax2 = ax2.scatter(X, Y, s=Z)
+    >>> cax3 = ax3.pcolormesh(Z)
+    >>> cax4 = ax4.plot(Z[:, 0])
+    >>> rasterize_list = [cax1, cax2, cax3]
+    >>> rasterize_and_save('out.svg', rasterize_list, fig=fig, dpi=300)
+    """
+
+    # Behave like pyplot and act on current figure if no figure is specified
+    fig = plt.gcf() if fig is None else fig
+
+    # Need to set_rasterization_zorder in order for rasterizing to work
+    zorder = -5  # Somewhat arbitrary, just ensuring less than 0
+
+    if rasterize_list is None:
+        # Have a guess at stuff that should be rasterised
+        types_to_raster = ['QuadMesh', 'Contour', 'collections']
+        rasterize_list = []
+
+        print("""
+        No rasterize_list specified, so the following objects will
+        be rasterized: """)
+        # Get all axes, and then get objects within axes
+        for ax in fig.get_axes():
+            for item in ax.get_children():
+                if any(x in str(item) for x in types_to_raster):
+                    rasterize_list.append(item)
+        print('\n'.join([str(x) for x in rasterize_list]))
+    else:
+        # Allow rasterize_list to be input as an object to rasterize
+        if type(rasterize_list) != list:
+            rasterize_list = [rasterize_list]
+
+    for item in rasterize_list:
+
+        # Whether or not plot is a contour plot is important
+        is_contour = (isinstance(item, matplotlib.contour.QuadContourSet) or
+                      isinstance(item, matplotlib.tri.TriContourSet))
+
+        # Whether or not collection of lines
+        # This is commented as we seldom want to rasterize lines
+        # is_lines = isinstance(item, matplotlib.collections.LineCollection)
+
+        # Whether or not current item is list of patches
+        all_patch_types = tuple(
+            x[1] for x in getmembers(matplotlib.patches, isclass))
+        try:
+            is_patch_list = isinstance(item[0], all_patch_types)
+        except TypeError:
+            is_patch_list = False
+
+        # Convert to rasterized mode and then change zorder properties
+        if is_contour:
+            curr_ax = item.ax.axes
+            curr_ax.set_rasterization_zorder(zorder)
+            # For contour plots, need to set each part of the contour
+            # collection individually
+            for contour_level in item.collections:
+                contour_level.set_zorder(zorder - 1)
+                contour_level.set_rasterized(True)
+        elif is_patch_list:
+            # For list of patches, need to set zorder for each patch
+            for patch in item:
+                curr_ax = patch.axes
+                curr_ax.set_rasterization_zorder(zorder)
+                patch.set_zorder(zorder - 1)
+                patch.set_rasterized(True)
+        else:
+            # For all other objects, we can just do it all at once
+            curr_ax = item.axes
+            curr_ax.set_rasterization_zorder(zorder)
+            item.set_rasterized(True)
+            item.set_zorder(zorder - 1)
+
+    # dpi is a savefig keyword argument, but treat it as special since it is
+    # important to this function
+    if dpi is not None:
+        savefig_kw['dpi'] = dpi
+
+    # Save resulting figure
+    fig.savefig(fname, **savefig_kw)

@@ -1,18 +1,6 @@
-''' This runs the CSW task with RNN MRNN NG and NG-Z 
-for several curricula 'interleaved, blocked, interleaved_blocked, blocked_interleaved
-and several parameter combinations.
-Used to run specific param combinations for the plot in the paper. 
-
-Then use csw_analyze_arrays.py script to analyze the results.
-
-It can handle running multipe interleaved phase durations for NG
-but really the more specialized script to sweep over NG and NG-Z
-is forked off to csw_run_neuragem_array.py
-
-Reorganized script to run both rnn and neuragem experiments.
-
-Each model has its own parameter grid. Parameters not relevant
-for one model are fixed in config_overrides. Results are saved in separate folders.
+''' This runs the seqlearning task to explore lower seq_len. 
+Recently I found that lowering seq_len to 6 or 10 is possible with a small increase to LU_lr from 0.1
+to 0.2.. also can use only 1 LU step. I will explore here integrating that in the main experiments. 
 '''
 
 import os
@@ -30,6 +18,7 @@ from functions_and_utils_2 import *
 from configs import ContextualSwitchingTaskConfig
 from models import *
 from datasets import create_datasets_and_loaders
+from seq_learn_config import run_name, get_base_params, apply_neuragem_overrides
 
 
 import plot_style
@@ -79,8 +68,22 @@ def run_single_experiment(model_name,
     Returns a tuple: (dict of training loggers by phase, testing logger).
     """
     # 1) set up base config and seeds
-    config = CSWConfig(experiment_to_run='few_long_blocks')    
+    config = seq_learnConfig(experiment_to_run='few_long_blocks')    
+    if model_name == 'neuragem':
+        # config.blocked_phase_length = 1500 # there is an override on this. 
+        apply_neuragem_overrides(config, param_combination)
     
+    # seq_len_hack = 6
+    # config.stride = 1
+    # config.LU_lr = 0.3
+    # config.no_of_steps_in_latent_space = 5
+    # config.l2_loss = 0.00002
+    # config.WU_lr = 0.01
+    # config.block_size = 40 * 6
+    # interleaved_duration_hack = 700
+    # blocked_phase_hack = 4500
+    
+
     torch.manual_seed(seed)
     np.random.seed(seed)
     config.env_seed = seed
@@ -94,7 +97,6 @@ def run_single_experiment(model_name,
     for p, v in param_combination.items():
         if p == 'seed': continue
         setattr(config, p, v)
-
     # 2) pull out curriculum‐phase flags and other params
     curriculum = param_combination.get('curriculum', curriculum)
     if curriculum == 'interleaved':
@@ -117,7 +119,6 @@ def run_single_experiment(model_name,
     for p, v in param_combination.items():
         if p == 'seed': continue
         setattr(config, p, v)
-
     # model‐specific tweaks
     if model_name in ['rnn', 'mrnn']:
         config.no_of_steps_in_latent_space = 0
@@ -194,32 +195,34 @@ def run_single_experiment(model_name,
     logger.config = config
 
     ##############################
-    # Testing phase (Changed to random testing to match the human experiment)
+    # Testing phase
     ##############################
-    testing_curriculum = 'random' # 'same_as_last_curriculum' or 'random'
+    config.LU_lr = 0.4 # from 0.3
+    config.no_of_steps_in_latent_space = 5
+    config.l2_loss = 0.0004 # from 0.00004
+
+ 
     if model_name == 'mrnn': # because the input horizon is so long it eats up most of the 240 ts testing phase as a quick fix, log in the initial timesteps, before I would exclude them as 'burn-in'
         config.log_initial_burn_in_timesteps = True
     logger.log_phase('Testing\n(W frozen)')
     config.no_of_steps_in_weight_space = 0
     testing_phase_length = 40 * config.task_length
-    if testing_curriculum == 'same_as_last_curriculum':
-        print(f"Testing with the same curriculum as training: {curriculum}")
-        if curriculum == ['interleaved', 'blocked_interleaved']: # continue testing with whatever was the current curriculum.
-            config.block_size = 1 * config.task_length
-        elif curriculum in ['blocked', 'interleaved_blocked', ]:
-            config.block_size = stored_block_size
-    else:       
-        print(f"Testing with a random curriculum (different from training)")
-        config.shuffle_or_interleave = 'random' # Contexts will appear randomly during testing instead of in interleaved
-        config.block_size = 1 * config.task_length # sample context every trial
+    if curriculum == ['interleaved', 'blocked_interleaved']: # continue testing with whatever was the current curriculum.
+        config.block_size = 1 * config.task_length
+    elif curriculum in ['blocked', 'interleaved_blocked', ]:
+        # testing_phase_leng cannot be less that the size of two blocks:
+        testing_phase_length = max(testing_phase_length, 2 * config.block_size)
+        config.block_size = stored_block_size
+    config.no_of_blocks = int(testing_phase_length / config.block_size)
+    _, _, dataloader, _ = create_datasets_and_loaders(config)
+    predictive_learning(logger, config, dataloader, model)
+    config.block_size = stored_block_size
 
-        # Adjustments to NeuraGEM to accommodate random testing curriculum as described in Methods 3.2
-        if model_name == 'neuragem':
-            config.LU_lr = 0.4 # from 0.2
-            config.no_of_steps_in_latent_space = 5
-            config.l2_loss = 0.0004 # from 0.00004
-
-
+    ###################### Additional testing with random context instead of interleaved or blocked.
+    logger.log_phase('Testing\n(with random context)')
+    config.shuffle_or_interleave = 'random' # Contexts will appear randomly during testing instead of in interleaved
+    
+    config.block_size = 1 * config.task_length
     config.no_of_blocks = int(testing_phase_length / config.block_size)
     _, _, dataloader, _ = create_datasets_and_loaders(config)
     predictive_learning(logger, config, dataloader, model)
@@ -228,61 +231,29 @@ def run_single_experiment(model_name,
     return logger
 
 if __name__ == "__main__":
-    # run_name = 'controlling_phase_lengths_runs'
-    # run_name = 'interleaved_random_transitions_runs'
-    run_name = 'random_ctx'
-    models = ['neuragem']
+    models = ['rnn', 'mrnn', 'neuragem']
+    # models = ['rnn', 'neuragem']
+    # models = ['rnn',]
+    # models = ['neuragem',]
+    # models = ['neuragem','rnn', 'mrnn']
+
     # the curricula you want to sweep over:
-    # curricula = ['interleaved', 'interleaved_blocked']
-    curricula = [ 'interleaved_blocked']
+    # curricula = ['blocked', 'interleaved', 'interleaved_blocked', ]
+    # curricula = ['interleaved', ]
+    # 'blocked_interleaved' ]
+    curricula = ['interleaved_blocked', 'blocked', 'interleaved', ]
 
     # global overrides
-    if curricula == ['interleaved_blocked']:
-        config_overrides = {
+    config_overrides = {
         'start_always_on_the_same_block': False,
         'add_passive_learning_phase': False,
-        'LU_lr': 0.2,
-        'WU_lr': 0.001,
-        'stride': 1,
-        'seq_len': 6,
-        'no_of_steps_in_latent_space': 1,
-        'l2_loss': 0.00003,
-        'pass_previous_latent': True,
-    }
-    else:        
-        config_overrides = {
-        'start_always_on_the_same_block': False,
-        'add_passive_learning_phase': False,
-        'LU_lr': 0.3,
-        'WU_lr': 0.001,
-        'stride': 1,
-        'seq_len': 6,
-        'no_of_steps_in_latent_space': 2,
-        'l2_loss': 0.00004,
-        'pass_previous_latent': True,
     }
     config_overrides_2 = None
 
     no_of_seeds = 20  # number of seeds to sweep over
-    # base params by model and curriculum
-    base_params = {
-        'neuragem': {
-            'interleaved': {
-                'blocked_phase_length': [1200],
-                'interleaved_phase_length': [7000],
-                'latent_updates_during_shuffle': [True, ],
-                'shuffle_or_interleave': [ 'shuffle'],
-                'random_transition_shuffle_or_interleave': ['shuffle'],
-            },
-            'interleaved_blocked': {
-                'blocked_phase_length': [2500],
-                'interleaved_phase_length': [700],
-                # 'latent_updates_during_shuffle': [True, False]
-                'latent_updates_during_shuffle': [ False],
-            },
-        },
-    }
 
+    # base params by model and curriculum
+    base_params = get_base_params()
     # BUILD THE LIST OF EXPERIMENTS
     experiments = []
     for model_name in models:
@@ -293,11 +264,6 @@ if __name__ == "__main__":
             param_grid['seed'] = list(range(no_of_seeds))
             # generate
             for combo in generate_param_combinations(param_grid):
-                if curriculum == 'interleaved':
-                    shuffle_mode = combo.get('shuffle_or_interleave')
-                    transition_mode = combo.get('random_transition_shuffle_or_interleave')
-                    if shuffle_mode != transition_mode:
-                        continue
                 # inject the curriculum into the combo so run_single_experiment picks it up
                 combo['curriculum'] = curriculum
                 experiments.append((
@@ -316,11 +282,6 @@ if __name__ == "__main__":
     print(f'Running experiment: {task_id} out of a total of {len(experiments)} experiments to run', )
     seed = param_combination['seed']
 
-    # make a folder name excluding seed
-    filtered = {k: v for k, v in param_combination.items() if k != 'seed'}
-    combination_key = "_".join(f"{k}-{v}" for k, v in sorted(filtered.items()))
-    export_path = os.path.join('./exports/csw/experiments', run_name, combination_key)
-    os.makedirs(export_path, exist_ok=True)
 
     print(f"Running {model_name} | curriculum={curriculum} | params={param_combination}")
     logger = run_single_experiment(
@@ -332,17 +293,29 @@ if __name__ == "__main__":
         config_overrides_2
     )
 
+    # make a folder name excluding seed
+    filtered = {k: v for k, v in param_combination.items() if k != 'seed'}
+    combination_key = "_".join(f"{k}-{v}" for k, v in sorted(filtered.items()))
+    export_path = os.path.join(f'./exports/{logger.config.dataset_name}/experiments', run_name, combination_key)
+    os.makedirs(export_path, exist_ok=True)
+
     filename = f"results_{model_name}_{combination_key}_seed-{seed}.pkl"
     save_results(filename, logger, export_path)
     print(f"Saved → {os.path.join(export_path, filename)}")
 
-#%%
     plot_logger = True
     if plot_logger:
         panel_order = ['corrects', 'latent_2d', 'gradients']
         fig = plot_logger_panels(
-            logger, logger.config, panel_order, subplot_height=1.5, annotate_phases='corrects',
-            width=7)
-        
-        # if logger.config.dataset_name == 'seq_learn':
-        #     fig = plot_seq_learn_behavior_and_overall_corrects(logger, logger.config, include_gradients=True)
+            logger, logger.config, panel_order, subplot_height=1.5, #annotate_phases='corrects',
+            width=6)
+        for ax in fig.axes:
+            max_x = ax.get_xlim()[1]
+            ax.set_xlim(max_x -500,None)
+        fig.tight_layout()
+
+        fig = plot_logger_panels(
+            logger, logger.config, panel_order, subplot_height=1.5, #annotate_phases='corrects',
+            width=6)
+        # plt.savefig(os.path.join(export_path, f"training_curves_{model_name}_{combination_key}_seed-{seed}.png"), dpi=300)
+        # print('figure was saved to', f'')

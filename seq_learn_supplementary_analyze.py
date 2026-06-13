@@ -37,49 +37,6 @@ from collections import defaultdict
 from itertools import product
 import matplotlib.gridspec as gridspec
 
-# %% THIS CODE IS ADAPTED FROM THE ORIGINAL PAPER REPOSITORY. 
-## Load human data
-# From the Collab authors provided at: https://colab.research.google.com/github/PrincetonCompMemLab/csw_paper_final/blob/master/generate_paper_figures.ipynb#scrollTo=kmnNJROHRq7f&uniqifier=1
-
-numeric_only = True
-
-ALL_CONDITIONS = ['blocked',
- 'interleaved',
- 'blocked_rep',
- 'interleaved_rep',
- 'explicit_interleaved',
- 'inserted_early',
- 'inserted_middle',
- 'inserted_late',
- 'inserted_early_rep',
- 'inserted_middle_rep',
- 'inserted_late_rep']
-
-## load and save
-dfD = {}
-for cond in ALL_CONDITIONS:
-  for thresh in [0.9,0]:
-    fname = f"{cond}_thresh{int(thresh*100)}.csv"
-    df = pd.read_csv(f'https://raw.githubusercontent.com/PrincetonCompMemLab/blocked_training_facilitates_learning/master/data/human/{fname}')
-    dfD[cond,thresh] = df
-human_df = pd.concat(dfD,names=['condition','thresh'])
-
-# additional columns
-human_df.loc[:,'score'] = human_df.correct_response
-human_df.loc[:,'response_node'] = human_df.apply(lambda r: [r.false_tonode,r.true_tonode][r.correct_response],axis=1)
-node2stateD = {
-  "BEGIN":0,
-  "LOCNODEB":1,
-  "LOCNODEC":2,
-  "NODE11":3,
-  "NODE12":4,
-  "NODE21":5,
-  "NODE22":6,
-  "NODE31":7,
-  "NODE32":8,
-  "END":9
-}
-
 
 ###########################
 ##########################
@@ -203,7 +160,8 @@ def betas_scatter_local(t_rnd_betas, t_cid_betas, ax: mpl.axes._axes.Axes = None
 # Experiment identifiers
 # run_name = 'initial_runs'
 # run_name = 'controlling_phase_lengths_runs'
-run_name = 'interleaved_vs_interleaved_blocked'
+# run_name = 'interleaved_vs_interleaved_blocked'
+run_name = 'random_ctx'
 export_base_path = f'./exports/csw/experiments/{run_name}/'
 
 # base params by model and curriculum
@@ -211,18 +169,15 @@ base_params = {
         'neuragem': {
             'interleaved': {
                 'blocked_phase_length': [1200],
-                'interleaved_phase_length': [1200],
+                'interleaved_phase_length': [7000],
                 'latent_updates_during_shuffle': [True],
                 'shuffle_or_interleave': ['interleave', 'shuffle'],
                 'random_transition_shuffle_or_interleave': ['interleave', 'shuffle'],
             },
             'interleaved_blocked': {
-                'blocked_phase_length': [1200],
-                'interleaved_phase_length': [500],
-                # 'interleaved_phase_length': [ 100, 200, 300, 400, 500, ],
-                # 'interleaved_phase_length': [50, 600, 700,800, 900, 1000, 1100, 1200, 1300, 1400, 1500],
-                'latent_updates_during_shuffle': [True, False]
-            },
+                'blocked_phase_length': [2500],
+                'interleaved_phase_length': [700],
+                'latent_updates_during_shuffle': [True, False]            },
         },
     }
 
@@ -290,57 +245,8 @@ if missing_files:
         print(entry)
 
 #%%
-# ------------------------------------------------------------
-# Preprocess human data ONCE and cache for plotting
-# ------------------------------------------------------------
-# This block preprocesses and stores human data for each curriculum
-# so plotting can be repeated without recomputing.
 
-# Map curriculum to human data plotting parameters
-curriculum_to_human = {
-    'interleaved_blocked':  {'condL': ['inserted_late'],    'labels': ['Interleaved Blocked']},
-    'interleaved':          {'condL': ['interleaved'],      'labels': ['Interleaved']},
-}
 
-# Precompute and cache processed human dataframes for each curriculum
-human_plot_data = {}
-
-for curriculum, params in curriculum_to_human.items():
-    condL = params['condL']
-    labels = params['labels']
-    thresh = 0.9
-    # Add columns if not already present
-    if 'rfc_int' not in human_df.columns:
-        human_df.loc[:, 'rfc_int'] = (human_df.true_rfc.str.split('-').str[-1].str.lower() == 'jungle').astype('int')
-    if 'response_node_int' not in human_df.columns:
-        human_df.loc[:, 'response_node_int'] = human_df.apply(lambda r: node2stateD[r.response_node], axis=1)
-    df_plt = human_df.query(f"condition==@condL&thresh==@thresh").reset_index()
-    dftest_plt = df_plt.query("block==4")
-    grouped = dftest_plt.groupby(['subjnum', 'condition']).mean(numeric_only=numeric_only).reset_index()
-    human_plot_data[curriculum] = {'grouped': grouped, 'labels': labels, 'condL': condL}
-
-def plot_human_data_by_condition_cached(curriculum, ax=None, width = 0.5):
-    data = human_plot_data[curriculum]
-    grouped = data['grouped']
-    labels = data['labels']
-    condL = data['condL']
-    if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=cs.panel_small_size)
-    g = sns.violinplot(
-        data=grouped,
-        x='condition', y='score', hue_order='condition', ax=ax, order=condL,
-        width=width  # Slim the violins
-    )
-    sns.stripplot(
-        data=grouped,
-        x='condition', y='score', ax=ax, order=condL,
-        color='black', size=cs.marker_size, alpha=0.5, jitter=True
-    )
-    ax.axhline(0.5, color='black', linestyle='--', alpha=0.5)
-    ax.set_ylabel('Prediction accuracy')
-    ax.set_xlabel('')
-    ax.set_xticklabels(['Humans'])
-    ax.set_ylim(0.3, 1.3)
 
 def get_interleaved_condition_runs(all_loggers):
     curriculum = 'interleaved'
@@ -422,7 +328,7 @@ for curriculum, runs_true, condition_label, condition_key in plot_configs:
         else:
             for key, loggers in all_loggers[curriculum][model].items():
                 runs = loggers
-                scs = [compute_testing_score(l, transitions_to_use=['T1/2','T5/6'])
+                scs = [compute_testing_score(l, transitions_to_use=['T5/6'])
                        for l in runs]
                 all_scores.extend(scs)
                 all_models.extend([model]*len(scs))
@@ -442,7 +348,7 @@ for curriculum, runs_true, condition_label, condition_key in plot_configs:
     palette = [getattr(cs, m, 'gray') for m in models_to_plot]
     sns.violinplot(x='model', y='accuracy', data=df,
                    order=models_to_plot, ax=ax,
-                   palette=palette, scale='width', width=0.4),
+                   palette=palette, scale='width', width=0.3, inner=None, linewidth=0.7),
     sns.stripplot(x='model', y='accuracy', data=df,
                   order=models_to_plot, ax=ax,
                   color='black', size=cs.marker_size,
@@ -450,7 +356,7 @@ for curriculum, runs_true, condition_label, condition_key in plot_configs:
     ax.axhline(0.5, color='black', linestyle='--', alpha=0.5)
     ax.set_ylim(0.3, 1.3)
     ax.set_ylabel("Prediction accuracy")
-    ax.set_yticklabels([])
+    # ax.set_yticklabels([])
     ax.set_xlabel("")
     label_map = {'rnn': 'RNN', 'mrnn': 'MRNN', 'neuragem': 'NG', 'neuragem_z_lesioned': 'NG\nZ-Lesioned'}
     xticklabels = [label_map.get(m, m) for m in models_to_plot]
@@ -475,7 +381,7 @@ for curriculum, runs_true, condition_label, condition_key in plot_configs:
 
     ## regress betas for neuragem and save them for later plotting in cid_above and cid_below and rnd_above and rnd_below
     if curriculum == 'interleaved_blocked':
-        scores = [compute_testing_score(l, transitions_to_use=['T1/2',])
+        scores = [compute_testing_score(l, transitions_to_use=['T5/6',])
                 for l in runs_true]
         # Separate runs_true into above-average and below-average groups
         avg_score = np.mean(scores)
@@ -485,7 +391,7 @@ for curriculum, runs_true, condition_label, condition_key in plot_configs:
         cid_above, rnd_above = compute_phase_betas(runs_above_avg, curriculum_phase_to_regress[curriculum])
         cid_below, rnd_below = compute_phase_betas(runs_below_avg, curriculum_phase_to_regress[curriculum])
     
-    fig.tight_layout()
+    # fig.tight_layout()
     save_folder = f'./exports/csw/{run_name}/analysis/'
     os.makedirs(save_folder, exist_ok=True)
     if condition_key:
@@ -493,6 +399,10 @@ for curriculum, runs_true, condition_label, condition_key in plot_configs:
     else:
         fname = f"all_models_latent_{curriculum}.pdf"
     save_path = os.path.join(save_folder, fname)
+    # if save_path longer than 255 characters, truncate the middle of the filename
+    if len(save_path) > 255:
+        base, ext = os.path.splitext(save_path)
+        save_path = base[:100] + '...' + base[-100:] + ext
     plt.savefig(save_path, transparent=True, bbox_inches='tight', facecolor='white')
     # plt.close(fig)
     print(f"Saved figure: {save_path}")
@@ -542,9 +452,9 @@ model = 'neuragem_z_lesioned'
 runs = []
 for key, loggers in all_loggers[curriculum][model].items():
     runs.extend(loggers)
-scs = [compute_testing_score(l, transitions_to_use=['T1/2',]) for l in runs]
+scs = [compute_testing_score(l, transitions_to_use=['T5/6',]) for l in runs]
 df = pd.DataFrame({'accuracy': scs})
-sns.violinplot(y='accuracy', data=df, ax=ax_acc, color=getattr(cs, model, 'gray'), width=0.3)
+sns.violinplot(y='accuracy', data=df, ax=ax_acc, color=getattr(cs, model, 'gray'), width=0.3, inner=None, linewidth=0.7)
 sns.stripplot(y='accuracy', data=df, ax=ax_acc, color='black', size=cs.marker_size, alpha=0.5, jitter=True)
 ax_acc.axhline(0.5, color='black', linestyle='--', alpha=0.5)
 ax_acc.set_ylim(0.3, 1.3)
